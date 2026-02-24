@@ -51,7 +51,7 @@ def main():
     print(f"Seed set to: {PARAMS['seed']}")
 
     device = torch.device(
-        PARAMS["device"] if torch.cuda.is_available() else "cpu"
+        PARAMS["device"] if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     )
     print(f"Using device: {device}")
 

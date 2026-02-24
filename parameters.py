@@ -17,7 +17,7 @@ PARAMS = {
 
     # Misc
     "seed": 42,
-    "device": "cuda",        # "cuda" or "cpu"
+    "device": "mps",        # "cuda" or "cpu" or "mps" for Apple Silicon
     "save_path": "best_model.pth",
     "log_interval": 100,     # print every N batches
 }
