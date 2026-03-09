@@ -10,7 +10,7 @@ class LambdaLayer(nn.Module):
     def forward(self, x):
         return self.lambd(x)
 
-class BasicBlock(nn.Module):
+class BasicBlock(nn.Module): #Residual block 
     """
     Basic residual block used in shallow ResNet architectures (e.g., ResNet-18, ResNet-34).
 
@@ -69,10 +69,13 @@ class BasicBlock(nn.Module):
             if option == 'A':
                 """
                 For CIFAR10 ResNet paper uses option A.
+                Information gets lost 
                 """
                 self.shortcut = LambdaLayer(lambda x:
                                             F.pad(x[:, :, ::2, ::2], (0, 0, 0, 0, channels//4, channels//4), "constant", 0))
             elif option == 'B':
+                #More efficient 
+                #Learnable parameter but more computationally expensive    1X1 convultion --> reducing ot increasing dimesion 
                 self.shortcut = nn.Sequential(
                      nn.Conv2d(in_channels, self.expansion * channels, kernel_size=1, stride=stride, bias=False),
                      norm(self.expansion * channels)
@@ -81,7 +84,7 @@ class BasicBlock(nn.Module):
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out += self.shortcut(x)
+        out += self.shortcut(x) #Residual Part 
         out = F.relu(out)
         return out
 
@@ -148,7 +151,7 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 128, num_blocks[1], norm=norm,stride=2)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], norm=norm,stride=2)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], norm=norm,stride=2)
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))  #just need to specify the final output 
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
     def _make_layer(self, block, channels, num_blocks, norm, stride):

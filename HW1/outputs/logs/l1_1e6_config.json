@@ -1,0 +1,47 @@
+{
+  "run_name": "l1_1e6",
+  "experiment_group": "regularization",
+  "data": {
+    "data_dir": "./data",
+    "batch_size": 128,
+    "num_workers": 2,
+    "train_size": 55000,
+    "val_size": 5000,
+    "mean": [
+      0.1307
+    ],
+    "std": [
+      0.3081
+    ]
+  },
+  "model": {
+    "input_dim": 784,
+    "hidden_dims": [
+      256,
+      128
+    ],
+    "num_classes": 10,
+    "activation": "relu",
+    "dropout": 0.2,
+    "use_batchnorm": true
+  },
+  "train": {
+    "epochs": 20,
+    "learning_rate": 0.001,
+    "optimizer_name": "adam",
+    "momentum": 0.9,
+    "weight_decay": 0.0,
+    "l1_lambda": 1e-06,
+    "scheduler_name": "none",
+    "step_size": 5,
+    "gamma": 0.5,
+    "plateau_factor": 0.5,
+    "plateau_patience": 2,
+    "early_stopping": true,
+    "early_stopping_patience": 5,
+    "min_delta": 0.0,
+    "seed": 42,
+    "device": "cuda",
+    "log_interval": 100
+  }
+}
