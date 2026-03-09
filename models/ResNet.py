@@ -10,7 +10,7 @@ class LambdaLayer(nn.Module):
     def forward(self, x):
         return self.lambd(x)
 
-class BasicBlock(nn.Module): #Residual block 
+class BasicBlock(nn.Module):
     """
     Basic residual block used in shallow ResNet architectures (e.g., ResNet-18, ResNet-34).
 
@@ -56,7 +56,7 @@ class BasicBlock(nn.Module): #Residual block
             H_out = H / stride
             W_out = W / stride
     """
-  
+
     expansion = 1 # For BasicBlock, output channels = channels * expansion = channels
     def __init__(self, in_channels, channels, stride=1,norm=nn.BatchNorm2d, option='B'):
         super(BasicBlock, self).__init__()
@@ -69,22 +69,24 @@ class BasicBlock(nn.Module): #Residual block
             if option == 'A':
                 """
                 For CIFAR10 ResNet paper uses option A.
-                Information gets lost 
                 """
                 self.shortcut = LambdaLayer(lambda x:
                                             F.pad(x[:, :, ::2, ::2], (0, 0, 0, 0, channels//4, channels//4), "constant", 0))
+                # The slicing x[:, :, ::2, ::2] performs downsampling by taking every second pixel in height and width dimensions.
+                # (1, 16, 32, 32) → (1, 16, 16, 16) after slicing.
+                # Format: (padding_left, padding_right, padding_top, padding_bottom, padding_channel_left, padding_channel_right).
+                # (1, 16, 16, 16) → (1, 32, 16, 16) after padding channels from 16 to 32, channels//4 = 32//4 = 8 zeros added to the left and right of the channel dimension
             elif option == 'B':
-                #More efficient 
-                #Learnable parameter but more computationally expensive    1X1 convultion --> reducing ot increasing dimesion 
                 self.shortcut = nn.Sequential(
                      nn.Conv2d(in_channels, self.expansion * channels, kernel_size=1, stride=stride, bias=False),
                      norm(self.expansion * channels)
                 )
+                # (1, 16, 32, 32) → (1, 32, 16, 16) after 1×1 convolution with stride=2 and output channels=32.
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out += self.shortcut(x) #Residual Part 
+        out += self.shortcut(x)
         out = F.relu(out)
         return out
 
@@ -139,7 +141,7 @@ class ResNet(nn.Module):
     ----------
     [1] He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep residual learning for image recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 770-778).
     [2] https://github.com/KaimingHe/deep-residual-networks
-    
+
     """
     def __init__(self, block, num_blocks, norm=nn.BatchNorm2d, num_classes=10):
         super(ResNet, self).__init__()
@@ -151,7 +153,7 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 128, num_blocks[1], norm=norm,stride=2)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], norm=norm,stride=2)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], norm=norm,stride=2)
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))  #just need to specify the final output 
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
     def _make_layer(self, block, channels, num_blocks, norm, stride):
@@ -172,6 +174,3 @@ class ResNet(nn.Module):
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
-
-
-
