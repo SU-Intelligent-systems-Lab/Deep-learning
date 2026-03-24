@@ -7,6 +7,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+"""
+### Why Is MobileNetV2 So Efficient?
+
+For a 3×3 conv, 32 input channels, 64 output channels, on a 16×16 feature map:
+
+**Standard conv cost:**
+3 × 3 × 32 × 64 × 16 × 16 = 9,437,184 multiplications
+
+
+**Depthwise + Pointwise cost:**
+depthwise:  3 × 3 × 32 × 16 × 16        =   73,728
+pointwise:  1 × 1 × 32 × 64 × 16 × 16   = 524,288
+total:                                   = 598,016
+
+
+ResNet-18:   ~556M
+MobileNetV2:  ~91M 
+─────────────────────────
+Ratio:          6.1×  lighter
+
+"""
 
 class Block(nn.Module):
     '''expand + depthwise + pointwise'''
