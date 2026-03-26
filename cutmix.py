@@ -67,8 +67,8 @@ MEAN = (0.485, 0.456, 0.406)
 STD  = (0.229, 0.224, 0.225)
 
 tf = transforms.Compose([
-    transforms.Resize(128),
-    transforms.CenterCrop(128),
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize(MEAN, STD),
 ])
@@ -132,33 +132,9 @@ def visualise_cutmix(n_examples=5, alpha=1.0):
     plt.tight_layout()
     plt.savefig("cutmix_examples.png", dpi=150, bbox_inches="tight")
 
-def visualise_alpha_effect(alpha_values=(0.2, 0.5, 1.0, 2.0), n_pairs=3):
-    images, label_names = get_diverse_samples(n_pairs * 2)
-    img_A, lbl_A = images[:n_pairs],  label_names[:n_pairs]
-    img_B, lbl_B = images[n_pairs:],  label_names[n_pairs:]
-    _, _, H, W = img_A.shape
-
-    fig, axes = plt.subplots(n_pairs, len(alpha_values),
-                             figsize=(4*len(alpha_values), 3.5*n_pairs))
-    fig.suptitle("CutMix — Effect of α\nLow α → extreme patches; High α → medium patches",
-                 fontsize=12, fontweight="bold")
-    for col, alpha in enumerate(alpha_values):
-        axes[0, col].set_title(f"α = {alpha}", fontsize=11, fontweight="bold")
-        for row in range(n_pairs):
-            lam = np.random.beta(alpha, alpha)
-            x1, y1, x2, y2, la = rand_bbox(H, W, lam)
-            m = img_A[row].clone()
-            m[:, y1:y2, x1:x2] = img_B[row, :, y1:y2, x1:x2]
-            axes[row, col].imshow(denorm(m))
-            axes[row, col].set_xlabel(f"λ={la:.2f}  {lbl_A[row]}+{lbl_B[row]}", fontsize=7)
-            axes[row, col].axis("off")
-
-    plt.tight_layout()
-    plt.savefig("cutmix_alpha_effect.png", dpi=150, bbox_inches="tight")
 
 
 if __name__ == "__main__":
     login()
     visualise_cutmix(n_examples=10, alpha=1.0)
-    visualise_alpha_effect(alpha_values=(0.2, 0.5, 1.0, 2.0))
     os._exit(0)
