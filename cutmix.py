@@ -45,27 +45,6 @@ def rand_bbox(H, W, lam):
     return x1, y1, x2, y2, 1.0 - (x2-x1)*(y2-y1)/(H*W)
 
 
-def cutmix_batch(images, labels, alpha=1.0):
-    """
-    Apply CutMix to a whole batch.
-
-    Samples λ ~ Beta(α, α) per image — α=1 gives uniform mixing;
-    larger α pushes λ toward 0.5 (more aggressive); smaller α toward 0 or 1.
-    Each image is paired with a random donor from the same batch.
-
-    Returns: mixed_images, y_a, y_b, lam  (lam is a float tensor, shape (B,))
-    """
-    B, C, H, W = images.shape
-    perm   = torch.randperm(B)
-    lam_np = np.random.beta(alpha, alpha, size=B)
-    mixed, lam_out = images.clone(), np.empty(B)
-    for i in range(B):
-        x1, y1, x2, y2, la = rand_bbox(H, W, lam_np[i])
-        mixed[i, :, y1:y2, x1:x2] = images[perm[i], :, y1:y2, x1:x2]
-        lam_out[i] = la
-    return mixed, labels, labels[perm], torch.tensor(lam_out, dtype=torch.float32)
-
-
 def cutmix_criterion(criterion, outputs, y_a, y_b, lam):
     """
     CutMix-aware loss: weighted sum of two cross-entropy terms.
@@ -74,36 +53,6 @@ def cutmix_criterion(criterion, outputs, y_a, y_b, lam):
     lam = lam.to(outputs.device)
     return (lam * criterion(outputs, y_a.to(outputs.device)) +
             (1 - lam) * criterion(outputs, y_b.to(outputs.device))).mean()
-
-
-def train_one_epoch_with_cutmix(model, loader, optimizer, criterion,
-                                device, alpha=1.0, cutmix_prob=0.5):
-    """
-    Drop-in replacement for a standard training loop.
-    Applies CutMix randomly with probability cutmix_prob per batch.
-    On non-CutMix batches, uses standard cross-entropy.
-    """
-    model.train()
-    total_loss, correct, n = 0.0, 0, 0
-    for images, labels in loader:
-        images, labels = images.to(device), labels.to(device)
-        optimizer.zero_grad()
-        if np.random.rand() < cutmix_prob:
-            mixed, y_a, y_b, lam = cutmix_batch(images, labels, alpha)
-            out  = model(mixed)
-            loss = cutmix_criterion(criterion, out, y_a, y_b, lam)
-            preds = out.argmax(1)
-            correct += (lam.to(device) * preds.eq(y_a).float() +
-                        (1 - lam.to(device)) * preds.eq(y_b).float()).sum().item()
-        else:
-            out  = model(images)
-            loss = criterion(out, labels)
-            correct += out.argmax(1).eq(labels).sum().item()
-        loss.backward(); optimizer.step()
-        total_loss += loss.item() * images.size(0)
-        n          += images.size(0)
-    return total_loss / n, correct / n
-
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -122,11 +71,6 @@ def denorm(t):
     return np.clip(t.permute(1,2,0).numpy(), 0, 1)
 
 def get_diverse_samples(n):
-    """
-    Stream tiny-imagenet, returning one image from each of n distinct classes.
-    Streaming means only the images we actually use are downloaded.
-    """
-    print(f"  Streaming tiny-imagenet — 1 image from each of {n} classes ...")
     ds = load_dataset("zh-plus/tiny-imagenet", split="valid", streaming=True)
     seen, images, labels = set(), [], []
     for s in ds:
@@ -142,10 +86,6 @@ def get_diverse_samples(n):
 # ── Demos ─────────────────────────────────────────────────────────────────────
 
 def visualise_cutmix(n_examples=5, alpha=1.0):
-    """
-    For each of n_examples, show: Image A | Image B (donor) | Mixed | Soft label.
-    Each pair is drawn from a different class to make the mixing visually clear.
-    """
     images, label_names = get_diverse_samples(n_examples * 2)
     imgs_A, lbls_A = images[:n_examples],  label_names[:n_examples]
     imgs_B, lbls_B = images[n_examples:],  label_names[n_examples:]
@@ -183,15 +123,8 @@ def visualise_cutmix(n_examples=5, alpha=1.0):
 
     plt.tight_layout()
     plt.savefig("cutmix_examples.png", dpi=150, bbox_inches="tight")
-    print("Saved -> cutmix_examples.png"); plt.show()
-
 
 def visualise_alpha_effect(alpha_values=(0.2, 0.5, 1.0, 2.0), n_pairs=3):
-    """
-    Show how Beta(α, α) affects patch size.
-    Low α  → λ near 0 or 1 → very small or very large patches.
-    High α → λ near 0.5    → medium-sized patches.
-    """
     images, label_names = get_diverse_samples(n_pairs * 2)
     img_A, lbl_A = images[:n_pairs],  label_names[:n_pairs]
     img_B, lbl_B = images[n_pairs:],  label_names[n_pairs:]
@@ -214,37 +147,8 @@ def visualise_alpha_effect(alpha_values=(0.2, 0.5, 1.0, 2.0), n_pairs=3):
 
     plt.tight_layout()
     plt.savefig("cutmix_alpha_effect.png", dpi=150, bbox_inches="tight")
-    print("Saved -> cutmix_alpha_effect.png"); plt.show()
-
-
-def compare_augmentations():
-    """
-    Side-by-side: Original A | Donor B | Cutout (zero-fill) | CutMix (donor-fill).
-    Cutout wastes pixels; CutMix replaces them with real signal.
-    """
-    images, label_names = get_diverse_samples(2)
-    img_a, img_b = images[0], images[1]
-    la, lb = label_names[0], label_names[1]
-    _, H, W = img_a.shape
-    x1, y1, x2, y2, lam = rand_bbox(H, W, 0.5)
-
-    cutout = img_a.clone(); cutout[:, y1:y2, x1:x2] = 0.0
-    cutmix = img_a.clone(); cutmix[:, y1:y2, x1:x2] = img_b[:, y1:y2, x1:x2]
-
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-    fig.suptitle("Augmentation Comparison", fontsize=13, fontweight="bold")
-    for ax, img, title in zip(axes,
-        [denorm(img_a), denorm(img_b), denorm(cutout), denorm(cutmix)],
-        [f"Original A\n{la}", f"Donor B\n{lb}",
-         f"Cutout\n{la} only", f"CutMix\n{lam:.2f}·{la} + {1-lam:.2f}·{lb}"]):
-        ax.imshow(img); ax.set_title(title, fontsize=10); ax.axis("off")
-
-    plt.tight_layout()
-    plt.savefig("augmentation_comparison.png", dpi=150, bbox_inches="tight")
-    print("Saved -> augmentation_comparison.png"); plt.show()
 
 
 if __name__ == "__main__":
     visualise_cutmix(n_examples=5, alpha=1.0)
     visualise_alpha_effect(alpha_values=(0.2, 0.5, 1.0, 2.0))
-    compare_augmentations()

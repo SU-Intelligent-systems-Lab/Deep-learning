@@ -38,6 +38,10 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from datasets import load_dataset
+import ssl
+
+# Fix for macOS SSL certificate verification error when downloading MNIST
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 # ── GradCAM core ──────────────────────────────────────────────────────────────
@@ -112,17 +116,6 @@ def overlay(img, heatmap, alpha=0.5):
     return (np.clip((1 - alpha) * img + alpha * rgb, 0, 1) * 255).astype(np.uint8)
 
 def get_diverse_samples(n: int = 8):
-    """
-    Stream tiny-imagenet validation images, keeping one image per class
-    until we have n samples from n distinct classes.
-
-    Why streaming?
-    --------------
-    load_dataset(..., streaming=True) fetches only the records we actually
-    iterate over — no full download needed.  We scan sequentially and stop
-    as soon as we've collected one image from each of n different classes.
-    """
-    print(f"  Streaming tiny-imagenet — collecting 1 image from each of {n} classes ...")
     ds = load_dataset("zh-plus/tiny-imagenet", split="valid", streaming=True)
     seen, images, labels = set(), [], []
     for sample in ds:
@@ -141,11 +134,6 @@ def get_diverse_samples(n: int = 8):
 # ── Demo ──────────────────────────────────────────────────────────────────────
 
 def demo_multiclass(n_images: int = 8):
-    """
-    Run GradCAM on one image from each of n distinct tiny-imagenet classes
-    and display the results in a grid (Original | Heatmap | Overlay).
-    """
-    print("Loading pretrained ResNet-18 ...")
     model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
     model.eval()
 
@@ -175,8 +163,6 @@ def demo_multiclass(n_images: int = 8):
                  fontsize=13, fontweight="bold")
     plt.tight_layout()
     plt.savefig("gradcam_multiclass.png", dpi=150, bbox_inches="tight")
-    print("Saved -> gradcam_multiclass.png")
-    plt.show()
 
 
 if __name__ == "__main__":
