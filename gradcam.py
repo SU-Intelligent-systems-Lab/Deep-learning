@@ -82,14 +82,14 @@ class GradCAM:
         logits[0, class_idx].backward()
 
         # alpha_k^c = global-average-pool of gradients -> weighted sum -> ReLU
-        weights  = self.gradients.mean(dim=(2, 3), keepdim=True) # (1, K, 1, 1)
-        cam      = torch.relu((weights * self.activations).sum(dim=1, keepdim=True))
+        weights  = self.gradients.mean(dim=(2, 3), keepdim=True) # (1, K, 1, 1) ex. for resnet18 layer4[-1] K=512 so weights shape is (1, 512, 1, 1)
+        cam      = torch.relu((weights * self.activations).sum(dim=1, keepdim=True)) # (1, 1, H', W') ex. for resnet18 layer4[-1] H'=W'=7 so cam shape is (1, 1, 7, 7)
 
         # Normalise and upsample to input resolution
         cam = cam.squeeze().cpu().numpy()
         cam = (cam - cam.min()) / (cam.max() + 1e-8)
         h, w    = x.shape[2], x.shape[3]
-        heatmap = np.array(Image.fromarray(np.uint8(cam * 255)).resize((w, h), Image.BILINEAR)) / 255.0
+        heatmap = np.array(Image.fromarray(np.uint8(cam * 255)).resize((w, h), Image.BILINEAR)) / 255.0 # (H, W) ex. for resnet18 layer4[-1] (224, 224)
         return heatmap, class_idx
 
     def remove_hooks(self):

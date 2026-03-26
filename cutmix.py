@@ -91,7 +91,7 @@ def get_diverse_samples(n):
     return torch.stack(images), labels
 
 
-# ── Demos ─────────────────────────────────────────────────────────────────────
+# ── Demo ─────────────────────────────────────────────────────────────────────
 
 def visualise_cutmix(n_examples=5, alpha=1.0):
     images, label_names = get_diverse_samples(n_examples * 2)
@@ -106,6 +106,7 @@ def visualise_cutmix(n_examples=5, alpha=1.0):
         mixed[i, :, y1:y2, x1:x2] = imgs_B[i, :, y1:y2, x1:x2]
         boxes.append((x1, y1, x2, y2)); lam_out.append(la)
 
+#Plotting the results
     fig, axes = plt.subplots(n_examples, 4, figsize=(14, 3.2 * n_examples))
     fig.suptitle(f"CutMix  (α={alpha})\nImage A  |  Image B (donor)  |  Mixed  |  Soft label",
                  fontsize=13, fontweight="bold")
