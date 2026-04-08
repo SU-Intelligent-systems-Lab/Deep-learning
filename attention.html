@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-Attention Mechanism</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #050810;
+    --surface: #0d1224;
+    --border: #1e2a4a;
+    --accent: #4f8dff;
+    --accent2: #ff6b6b;
+    --accent3: #43e8a0;
+    --text: #e8eeff;
+    --muted: #5a6a9a;
+    --glow: rgba(79,141,255,0.18);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated starfield background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      radial-gradient(1px 1px at 10% 20%, rgba(79,141,255,0.4) 0%, transparent 100%),
+      radial-gradient(1px 1px at 80% 10%, rgba(255,107,107,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 60% 80%, rgba(67,232,160,0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 30% 70%, rgba(79,141,255,0.25) 0%, transparent 100%),
+      radial-gradient(1px 1px at 90% 50%, rgba(255,107,107,0.2) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 52px;
+  }
+
+  header .label {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.1s forwards;
+  }
+
+  header h1 {
+    font-size: clamp(2rem, 5vw, 3.4rem);
+    font-weight: 800;
+    line-height: 1.1;
+    background: linear-gradient(135deg, #fff 0%, #4f8dff 50%, #43e8a0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.2s forwards;
+  }
+
+  header p {
+    margin-top: 14px;
+    color: var(--muted);
+    font-size: 15px;
+    max-width: 520px;
+    margin-inline: auto;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.3s forwards;
+    line-height: 1.65;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Phase tabs ── */
+  .phase-tabs {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 36px;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.4s forwards;
+  }
+
+  .phase-btn {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 8px 20px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.25s;
+    user-select: none;
+  }
+
+  .phase-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .phase-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(79,141,255,0.35);
+  }
+
+  /* ── Main viz area ── */
+  .viz-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 36px 32px;
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    animation: fadeUp 0.6s ease 0.5s forwards;
+  }
+
+  .viz-card::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 240px; height: 240px;
+    background: radial-gradient(circle, rgba(79,141,255,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .section-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 24px;
+  }
+
+  /* ── Token row ── */
+  .token-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+
+  .token {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+
+  .token:hover { transform: translateY(-3px); }
+
+  .token-box {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: #0a0f20;
+    transition: all 0.25s;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  .token.selected .token-box {
+    border-color: var(--accent2);
+    background: rgba(255,107,107,0.1);
+    box-shadow: 0 0 18px rgba(255,107,107,0.25);
+  }
+
+  .token-idx {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .token-role {
+    font-size: 10px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    display: none;
+  }
+
+  .token.selected .token-role { display: block; }
+  .role-q { background: rgba(255,107,107,0.15); color: var(--accent2); }
+  .role-k { background: rgba(79,141,255,0.15); color: var(--accent); }
+  .role-v { background: rgba(67,232,160,0.15); color: var(--accent3); }
+
+  /* ── Phase panels ── */
+  .phase-panel { display: none; }
+  .phase-panel.active { display: block; }
+
+  /* ── QKV matrix display ── */
+  .qkv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 8px;
+  }
+
+  .matrix-block {
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .matrix-header {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 8px 14px;
+    text-align: center;
+  }
+
+  .mh-q { background: rgba(255,107,107,0.12); color: var(--accent2); }
+  .mh-k { background: rgba(79,141,255,0.12); color: var(--accent); }
+  .mh-v { background: rgba(67,232,160,0.12); color: var(--accent3); }
+
+  .matrix-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .matrix-row {
+    display: flex;
+    gap: 4px;
+  }
+
+  .matrix-cell {
+    flex: 1;
+    height: 28px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--text);
+    transition: all 0.4s;
+    background: #0a0f20;
+    border: 1px solid transparent;
+  }
+
+  .matrix-cell.highlight-q { background: rgba(255,107,107,0.22); border-color: rgba(255,107,107,0.4); }
+  .matrix-cell.highlight-k { background: rgba(79,141,255,0.22); border-color: rgba(79,141,255,0.4); }
+  .matrix-cell.highlight-v { background: rgba(67,232,160,0.22); border-color: rgba(67,232,160,0.4); }
+
+  /* ── Attention score bars ── */
+  .score-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+  }
+
+  .score-label { width: 90px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .score-bar-bg {
+    flex: 1;
+    height: 20px;
+    background: #0a0f20;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .score-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.7s cubic-bezier(0.4,0,0.2,1);
+    background: linear-gradient(90deg, var(--accent), #7eb8ff);
+    position: relative;
+  }
+
+  .score-bar-fill.top {
+    background: linear-gradient(90deg, var(--accent2), #ff9e9e);
+    box-shadow: 0 0 12px rgba(255,107,107,0.4);
+  }
+
+  .score-val { width: 44px; text-align: right; color: var(--text); font-size: 11px; }
+
+  /* ── Attention map heatmap ── */
+  .heatmap-wrap {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .heatmap-grid-outer { flex: 1; min-width: 280px; }
+
+  .heatmap-axis-row {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 3px;
+    padding-left: 60px;
+  }
+
+  .heatmap-col-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    width: 36px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .heatmap-data-rows { display: flex; flex-direction: column; gap: 3px; }
+
+  .heatmap-data-row { display: flex; gap: 3px; align-items: center; }
+
+  .heatmap-row-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    width: 58px;
+    text-align: right;
+    padding-right: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .heatmap-cell {
+    width: 36px;
+    height: 36px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    border: 1px solid transparent;
+  }
+
+  .heatmap-cell:hover {
+    transform: scale(1.12);
+    border-color: rgba(255,255,255,0.2);
+    z-index: 2;
+    box-shadow: 0 0 14px rgba(79,141,255,0.35);
+  }
+
+  .heatmap-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    padding-top: 28px;
+  }
+
+  .heatmap-legend-bar {
+    width: 18px;
+    height: 160px;
+    border-radius: 100px;
+    background: linear-gradient(to bottom, #4f8dff, #1a2a5e, #050810);
+    border: 1px solid var(--border);
+  }
+
+  .legend-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+  }
+
+  /* ── Output stage ── */
+  .output-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 8px;
+  }
+
+  .output-token {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .output-vec {
+    width: 60px;
+    height: 60px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-family: 'Space Mono', monospace;
+    flex-direction: column;
+    gap: 2px;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .output-vec::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.12;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+  }
+
+  .output-vec-label {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+  }
+
+  .output-label {
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    color: var(--text);
+  }
+
+  /* ── Formula display ── */
+  .formula-box {
+    background: #0a0f20;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 24px;
+    text-align: center;
+    margin-bottom: 20px;
+  }
+
+  .formula {
+    font-family: 'Space Mono', monospace;
+    font-size: 15px;
+    color: var(--text);
+    letter-spacing: 1px;
+  }
+
+  .formula span.q  { color: var(--accent2); }
+  .formula span.k  { color: var(--accent); }
+  .formula span.v  { color: var(--accent3); }
+  .formula span.op { color: var(--muted); }
+
+  /* ── Info grid ── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .info-card {
+    background: #0a0f20;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .info-card-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .info-card-body {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ── Prompt hint ── */
+  .hint {
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+  }
+
+  /* ── Scrollable on mobile ── */
+  @media (max-width: 640px) {
+    .qkv-grid { grid-template-columns: 1fr; }
+    .heatmap-wrap { flex-direction: column; }
+  }
+
+  /* Pulse animation for selected token */
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,107,0.35); }
+    50%       { box-shadow: 0 0 0 6px rgba(255,107,107,0); }
+  }
+  .token.selected .token-box { animation: pulse-border 2s infinite; }
+
+  .step-note {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.65;
+    margin-bottom: 18px;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    margin-right: 4px;
+  }
+  .badge-q { background: rgba(255,107,107,0.15); color: var(--accent2); }
+  .badge-k { background: rgba(79,141,255,0.15); color: var(--accent); }
+  .badge-v { background: rgba(67,232,160,0.15); color: var(--accent3); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="label">Transformer Architecture</div>
+    <h1>Self-Attention Mechanism</h1>
+    <p>An interactive walkthrough of how tokens attend to each other through Query, Key and Value projections.</p>
+  </header>
+
+  <!-- Sentence / Token Selection -->
+  <div class="viz-card">
+    <div class="section-title">01 — Input Sequence</div>
+    <p class="step-note">Click any token to set it as the <span class="badge badge-q">Query</span>. The model computes attention scores from this token to all others.</p>
+    <div class="hint">↓ click a token to begin ↓</div>
+    <div class="token-row" id="tokenRow"></div>
+  </div>
+
+  <!-- Phase Tabs -->
+  <div class="phase-tabs">
+    <button class="phase-btn active" data-phase="qkv">1 · QKV Projections</button>
+    <button class="phase-btn" data-phase="scores">2 · Attention Scores</button>
+    <button class="phase-btn" data-phase="map">3 · Attention Map</button>
+    <button class="phase-btn" data-phase="output">4 · Output</button>
+  </div>
+
+  <!-- Phase 1: QKV -->
+  <div class="viz-card phase-panel active" id="panel-qkv">
+    <div class="section-title">QKV Projections</div>
+    <p class="step-note">
+      Each token embedding is linearly projected into three vectors:
+      <span class="badge badge-q">Q</span> Query — what am I looking for?
+      <span class="badge badge-k">K</span> Key — what do I contain?
+      <span class="badge badge-v">V</span> Value — what do I offer?
+    </p>
+    <div class="formula-box">
+      <div class="formula">
+        <span class="q">Q</span><span class="op"> = X·W</span><span class="q">Q</span>
+        &nbsp;&nbsp;
+        <span class="k">K</span><span class="op"> = X·W</span><span class="k">K</span>
+        &nbsp;&nbsp;
+        <span class="v">V</span><span class="op"> = X·W</span><span class="v">V</span>
+      </div>
+    </div>
+    <div class="qkv-grid" id="qkvGrid"></div>
+  </div>
+
+  <!-- Phase 2: Scores -->
+  <div class="viz-card phase-panel" id="panel-scores">
+    <div class="section-title">Attention Scores (Softmax)</div>
+    <p class="step-note">
+      The <span class="badge badge-q">Query</span> token's Q vector is dot-producted with every token's
+      <span class="badge badge-k">K</span> vector, scaled by √dₖ, then passed through softmax to get probabilities.
+    </p>
+    <div class="formula-box">
+      <div class="formula">
+        <span class="op">Attention(</span><span class="q">Q</span><span class="op">,</span><span class="k">K</span><span class="op">,</span><span class="v">V</span><span class="op">) = softmax(</span>
+        <span class="q">Q</span><span class="k">K</span><span class="op">ᵀ / √dₖ</span><span class="op">)·</span><span class="v">V</span>
+      </div>
+    </div>
+    <div class="score-list" id="scoreList"></div>
+  </div>
+
+  <!-- Phase 3: Attention Map -->
+  <div class="viz-card phase-panel" id="panel-map">
+    <div class="section-title">Full Attention Map</div>
+    <p class="step-note">
+      Each row shows how strongly that token attends to every other token. Brighter = stronger attention.
+    </p>
+    <div class="heatmap-wrap">
+      <div class="heatmap-grid-outer">
+        <div class="heatmap-axis-row" id="hmAxisRow"></div>
+        <div class="heatmap-data-rows" id="hmDataRows"></div>
+      </div>
+      <div class="heatmap-legend">
+        <div class="legend-label">1.0</div>
+        <div class="heatmap-legend-bar"></div>
+        <div class="legend-label">0.0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4: Output -->
+  <div class="viz-card phase-panel" id="panel-output">
+    <div class="section-title">Weighted Output Vectors</div>
+    <p class="step-note">
+      Each token's output is the weighted sum of all <span class="badge badge-v">Value</span> vectors, weighted by the attention scores. The output has the same dimension as the input embedding.
+    </p>
+    <div class="output-row" id="outputRow"></div>
+
+    <div class="info-grid" style="margin-top:28px;">
+      <div class="info-card">
+        <div class="info-card-title" style="color:var(--accent2);">Query</div>
+        <div class="info-card-body">Represents what the current token is searching for in the sequence. Acts as the "question".</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title" style="color:var(--accent);">Key</div>
+        <div class="info-card-body">Represents what information each token "advertises". The Q·Kᵀ dot product measures compatibility.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title" style="color:var(--accent3);">Value</div>
+        <div class="info-card-body">The actual content that gets aggregated. High-attention tokens contribute more to the output.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-title" style="color:var(--muted);">Scale √dₖ</div>
+        <div class="info-card-body">Prevents dot products from growing too large in high-dimensional spaces, keeping softmax gradients stable.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Data ─────────────────────────────────────────────────────────────────────
+const TOKENS = ["The", "cat", "sat", "on", "the", "mat"];
+const DIM = 4; // projected dimension for display
+
+// Seed deterministic "weights" from token index
+function pseudoRng(seed) {
+  let s = seed;
+  return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+}
+
+// Generate Q, K, V matrices [tokens × DIM]
+function buildQKV() {
+  const Q = [], K = [], V = [];
+  for (let i = 0; i < TOKENS.length; i++) {
+    const rq = pseudoRng(i * 31 + 7);
+    const rk = pseudoRng(i * 53 + 13);
+    const rv = pseudoRng(i * 79 + 19);
+    Q.push(Array.from({length: DIM}, () => +(rq() * 2 - 1).toFixed(2)));
+    K.push(Array.from({length: DIM}, () => +(rk() * 2 - 1).toFixed(2)));
+    V.push(Array.from({length: DIM}, () => +(rv() * 2 - 1).toFixed(2)));
+  }
+  return {Q, K, V};
+}
+
+function dot(a, b) { return a.reduce((s, v, i) => s + v * b[i], 0); }
+
+function softmax(arr) {
+  const max = Math.max(...arr);
+  const exp = arr.map(x => Math.exp(x - max));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map(x => x / sum);
+}
+
+function computeAttentionMatrix(Q, K) {
+  const n = Q.length, dk = Q[0].length;
+  const scale = Math.sqrt(dk);
+  return Q.map(qi => softmax(K.map(kj => dot(qi, kj) / scale)));
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let selectedToken = 0;
+let activePhase = 'qkv';
+const {Q, K, V} = buildQKV();
+const attentionMatrix = computeAttentionMatrix(Q, K);
+
+// ─── Token Row ────────────────────────────────────────────────────────────────
+function renderTokenRow() {
+  const row = document.getElementById('tokenRow');
+  row.innerHTML = '';
+  TOKENS.forEach((tok, i) => {
+    const div = document.createElement('div');
+    div.className = 'token' + (i === selectedToken ? ' selected' : '');
+    div.innerHTML = `
+      <div class="token-box">${tok}</div>
+      <div class="token-role role-q">Q</div>
+      <div class="token-idx">pos ${i}</div>`;
+    div.addEventListener('click', () => { selectedToken = i; refresh(); });
+    row.appendChild(div);
+  });
+}
+
+// ─── QKV Grid ─────────────────────────────────────────────────────────────────
+function renderQKV() {
+  const grid = document.getElementById('qkvGrid');
+  grid.innerHTML = '';
+  const matrices = [{label:'Q', cls:'q', data: Q}, {label:'K', cls:'k', data: K}, {label:'V', cls:'v', data: V}];
+  matrices.forEach(({label, cls, data}) => {
+    const block = document.createElement('div');
+    block.className = 'matrix-block';
+    block.innerHTML = `<div class="matrix-header mh-${cls}">${label} MATRIX  [${TOKENS.length}×${DIM}]</div>
+      <div class="matrix-body" id="mb-${cls}"></div>`;
+    grid.appendChild(block);
+    const body = block.querySelector(`#mb-${cls}`);
+    data.forEach((row, ri) => {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'matrix-row';
+      row.forEach(val => {
+        const cell = document.createElement('div');
+        cell.className = 'matrix-cell' + (ri === selectedToken ? ` highlight-${cls}` : '');
+        cell.textContent = val.toFixed(2);
+        rowEl.appendChild(cell);
+      });
+      body.appendChild(rowEl);
+    });
+  });
+}
+
+// ─── Scores ───────────────────────────────────────────────────────────────────
+function renderScores() {
+  const list = document.getElementById('scoreList');
+  list.innerHTML = '';
+  const scores = attentionMatrix[selectedToken];
+  const maxScore = Math.max(...scores);
+  scores.forEach((score, i) => {
+    const isTop = Math.abs(score - maxScore) < 1e-9;
+    const row = document.createElement('div');
+    row.className = 'score-row';
+    row.innerHTML = `
+      <div class="score-label">"${TOKENS[i]}"</div>
+      <div class="score-bar-bg">
+        <div class="score-bar-fill${isTop ? ' top' : ''}" style="width:0%"></div>
+      </div>
+      <div class="score-val">${(score * 100).toFixed(1)}%</div>`;
+    list.appendChild(row);
+    // Animate
+    setTimeout(() => {
+      row.querySelector('.score-bar-fill').style.width = (score * 100) + '%';
+    }, 50 + i * 80);
+  });
+}
+
+// ─── Heatmap ──────────────────────────────────────────────────────────────────
+function attnColor(v) {
+  // Deep blue (low) → bright blue (high)
+  const r = Math.round(5 + v * 74);
+  const g = Math.round(8 + v * 133);
+  const b = Math.round(16 + v * 239);
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderHeatmap() {
+  const axisRow = document.getElementById('hmAxisRow');
+  const dataRows = document.getElementById('hmDataRows');
+  axisRow.innerHTML = '';
+  dataRows.innerHTML = '';
+
+  // Col labels
+  TOKENS.forEach(tok => {
+    const el = document.createElement('div');
+    el.className = 'heatmap-col-label';
+    el.textContent = tok;
+    axisRow.appendChild(el);
+  });
+
+  // Rows
+  attentionMatrix.forEach((row, ri) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'heatmap-data-row';
+    const lbl = document.createElement('div');
+    lbl.className = 'heatmap-row-label';
+    lbl.textContent = TOKENS[ri];
+    rowEl.appendChild(lbl);
+    row.forEach((val, ci) => {
+      const cell = document.createElement('div');
+      cell.className = 'heatmap-cell';
+      cell.style.background = attnColor(val);
+      cell.style.color = val > 0.45 ? '#fff' : '#8899cc';
+      cell.textContent = val.toFixed(2);
+      cell.title = `"${TOKENS[ri]}" → "${TOKENS[ci]}": ${(val*100).toFixed(1)}%`;
+      // Highlight selected query row
+      if (ri === selectedToken) {
+        cell.style.outline = '2px solid var(--accent2)';
+        cell.style.outlineOffset = '2px';
+      }
+      rowEl.appendChild(cell);
+    });
+    dataRows.appendChild(rowEl);
+  });
+}
+
+// ─── Output ───────────────────────────────────────────────────────────────────
+function computeOutput(qi) {
+  const scores = attentionMatrix[qi];
+  return Array.from({length: DIM}, (_, d) =>
+    +(scores.reduce((s, w, i) => s + w * V[i][d], 0)).toFixed(2)
+  );
+}
+
+function renderOutput() {
+  const row = document.getElementById('outputRow');
+  row.innerHTML = '';
+  TOKENS.forEach((tok, i) => {
+    const out = computeOutput(i);
+    const div = document.createElement('div');
+    div.className = 'output-token';
+    const highlight = i === selectedToken ? 'border-color:var(--accent2);box-shadow:0 0 18px rgba(255,107,107,0.3)' : '';
+    div.innerHTML = `
+      <div class="output-vec" style="${highlight}">
+        ${out.slice(0,2).map(v => `<span style="font-size:8px;color:var(--accent3)">${v}</span>`).join('')}
+        <span style="font-size:8px;color:var(--muted)">...</span>
+      </div>
+      <div class="output-label">"${tok}"</div>
+      <div class="output-vec-label">z${i}</div>`;
+    row.appendChild(div);
+  });
+}
+
+// ─── Phase tabs ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.phase-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.phase-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.phase-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    activePhase = btn.dataset.phase;
+    document.getElementById('panel-' + activePhase).classList.add('active');
+    renderActivePhase();
+  });
+});
+
+function renderActivePhase() {
+  if (activePhase === 'qkv')    renderQKV();
+  if (activePhase === 'scores') renderScores();
+  if (activePhase === 'map')    renderHeatmap();
+  if (activePhase === 'output') renderOutput();
+}
+
+function refresh() {
+  renderTokenRow();
+  renderActivePhase();
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+refresh();
+</script>
+</body>
+</html>
