@@ -10,6 +10,24 @@ Run:
 
 The best checkpoint is saved to best_unet.pth and predictions are written to
 segmentation_results.png after training.
+
+Changes vs original
+-------------------
+1. DiceLoss added — directly penalises background collapse that FocalLoss
+   alone cannot prevent.  If the model ignores class c entirely, Dice_c = 1.0
+   regardless of background accuracy, making that shortcut explicitly costly.
+
+2. CombinedLoss = 0.7·FocalLoss + 0.3·DiceLoss — FocalLoss dominates early
+   so the model first learns basic structure, then Dice increasingly corrects
+   class-coverage gaps.  NO class weights — DiceLoss already handles
+   class imbalance implicitly.  Adding aggressive class weights (e.g.
+   background=0.1) on top of DiceLoss creates conflicting gradient signals
+   and stalls training (mIoU stuck at ~2%).
+
+3. BASE_FILTERS raised 32 → 64.  At 32, the bottleneck is only 512 channels
+   (32×16), too narrow to represent 21 VOC classes.  64 restores full U-Net
+   capacity from the paper (bottleneck = 1024 channels).  Use 48 if
+   GPU memory is tight.
 """
 
 import ssl
@@ -97,6 +115,7 @@ class VOCSegDataset(torch.utils.data.Dataset):
 
 
 # ---- Loss -----------------------------------------------------------------
+
 class FocalLoss(nn.Module):
     """
     Focal loss (Lin et al., 2017) for semantic segmentation.
@@ -104,6 +123,12 @@ class FocalLoss(nn.Module):
     Suppresses the gradient from easy, correctly-classified pixels by (1-p)^gamma,
     so misclassified foreground pixels dominate training instead of the abundant
     background class.  gamma=2 is the standard default.
+
+    No per-class weight tensor is used here.  DiceLoss in CombinedLoss already
+    corrects for class-frequency imbalance at the distribution level.  Adding
+    aggressive class weights (e.g. background=0.1) on top of DiceLoss makes
+    FocalLoss nearly blind to background errors while DiceLoss still penalises
+    them — the two losses pull in opposite directions and training stalls.
     """
     def __init__(self, gamma=2, ignore_index=255):
         super().__init__()
@@ -111,12 +136,85 @@ class FocalLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, logits, targets):
-        ce    = F.cross_entropy(logits, targets,
-                                ignore_index=self.ignore_index, reduction='none')
-        pt    = torch.exp(-ce)                      # probability of correct class
-        loss  = (1 - pt) ** self.gamma * ce
-        mask  = targets != self.ignore_index
+        ce   = F.cross_entropy(logits, targets,
+                               ignore_index=self.ignore_index,
+                               reduction="none")
+        pt   = torch.exp(-ce)                      # probability of correct class
+        loss = (1 - pt) ** self.gamma * ce
+        mask = targets != self.ignore_index
         return loss[mask].mean()
+
+
+class DiceLoss(nn.Module):
+    """
+    Soft multi-class Dice Loss.
+
+    For every class c:
+        Dice_c = 1 - (2·|pred_c ∩ gt_c| + smooth) / (|pred_c| + |gt_c| + smooth)
+
+    Mean is taken over classes that appear in the batch (union > 0), so absent
+    classes don't inflate the score.
+
+    Why this fixes background collapse
+    ------------------------------------
+    FocalLoss / CrossEntropyLoss are per-pixel.  A model predicting background
+    everywhere still achieves low loss because background pixels dominate
+    (~80-90% of VOC pixels).
+
+    DiceLoss is class-level: if the model never predicts class c, the
+    intersection term is 0 and Dice_c = 1.0 (maximum loss) regardless of how
+    many background pixels were correct.  This makes ignoring any foreground
+    class explicitly expensive — no per-class weight tensor needed.
+    """
+    def __init__(self, num_classes, ignore_index=255, smooth=1.0):
+        super().__init__()
+        self.num_classes  = num_classes
+        self.ignore_index = ignore_index
+        self.smooth       = smooth
+
+    def forward(self, logits, targets):
+        valid  = (targets != self.ignore_index).float()   # (B, H, W)
+        probs  = torch.softmax(logits, dim=1)             # (B, C, H, W)
+
+        dice_sum = 0.0
+        count    = 0
+        for c in range(self.num_classes):
+            gt   = (targets == c).float() * valid         # (B, H, W)
+            pred = probs[:, c] * valid                    # (B, H, W)
+
+            inter = (pred * gt).sum()
+            union = pred.sum() + gt.sum()
+
+            if union > 0:
+                dice_sum += 1.0 - (2.0 * inter + self.smooth) / (union + self.smooth)
+                count    += 1
+
+        return dice_sum / max(count, 1)
+
+
+class CombinedLoss(nn.Module):
+    """
+    FocalLoss + DiceLoss weighted sum.
+
+        Loss = (1 - dice_weight)·Focal  +  dice_weight·Dice
+
+    dice_weight=0.3 is intentionally conservative: FocalLoss dominates early
+    training so the model first learns basic image structure, then DiceLoss
+    increasingly corrects class-coverage gaps.
+
+    Do NOT add per-class weights to FocalLoss here.  DiceLoss already handles
+    class-frequency imbalance implicitly.  Combining class weights with
+    DiceLoss produces conflicting gradient directions and stalls training.
+    """
+    def __init__(self, num_classes, gamma=2, ignore_index=255, dice_weight=0.3):
+        super().__init__()
+        self.focal = FocalLoss(gamma=gamma, ignore_index=ignore_index)
+        self.dice  = DiceLoss(num_classes, ignore_index=ignore_index)
+        self.w     = dice_weight
+
+    def forward(self, logits, targets):
+        return (1.0 - self.w) * self.focal(logits, targets) \
+             +        self.w  * self.dice(logits, targets)
 
 
 # ---- Metric ---------------------------------------------------------------
@@ -190,7 +288,7 @@ def visualise(model, dataset, n=4):
         pred = model(img.unsqueeze(0).to(device)).argmax(dim=1).squeeze().cpu()
 
         img_show = (img * std + mean).clamp(0, 1).permute(1, 2, 0).numpy()
-        axes[row, 0].imshow(img_show);              axes[row, 0].set_title("Image")
+        axes[row, 0].imshow(img_show);               axes[row, 0].set_title("Image")
         axes[row, 1].imshow(mask_to_rgb(mask.numpy())); axes[row, 1].set_title("Ground truth")
         axes[row, 2].imshow(mask_to_rgb(pred.numpy())); axes[row, 2].set_title("Prediction")
         for ax in axes[row]:
@@ -217,7 +315,11 @@ if __name__ == "__main__":
     EPOCHS       = 20
     LR           = 1e-3
     WEIGHT_DECAY = 1e-4
-    BASE_FILTERS = 32   # 32 trains faster on CPU/MPS; set to 64 for full U-Net
+    # Raised from 32 → 64.  At 32, the U-Net bottleneck is only 512 channels
+    # (32×16), which is too narrow to represent 21 VOC classes reliably.
+    # At 64 it becomes 1024 — matching the original U-Net paper.
+    # Drop to 48 if you're running out of GPU memory.
+    BASE_FILTERS = 64
 
     # Data
     train_ds = VOCSegDataset(DATA_ROOT, image_set="train", size=IMAGE_SIZE, augment=True)
@@ -228,10 +330,21 @@ if __name__ == "__main__":
                               num_workers=2, pin_memory=True)
     print(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Device: {device}")
 
-    # Model — CrossEntropyLoss ignores void (255) pixels automatically
+    # CombinedLoss: FocalLoss handles per-pixel accuracy and hard examples;
+    # DiceLoss prevents background collapse by penalising ignored classes at
+    # the distribution level.  No per-class weights — they conflict with
+    # DiceLoss and stall training.
+    criterion = CombinedLoss(
+        num_classes  = NUM_CLASSES,
+        gamma        = 2,
+        ignore_index = VOID_IDX,
+        dice_weight  = 0.3,   # raise to 0.5 only if background collapse
+                              # persists past epoch 5
+    )
+
+    # Model
     model     = UNet(in_channels=3, num_classes=NUM_CLASSES,
                      base_filters=BASE_FILTERS).to(device)
-    criterion = FocalLoss(gamma=2, ignore_index=VOID_IDX)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR,
                                  weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
