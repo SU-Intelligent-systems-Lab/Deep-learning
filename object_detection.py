@@ -17,6 +17,7 @@ Best checkpoint → best_detector.pth
 Prediction visualisation → detection_results.png
 """
 
+import os
 import ssl
 import numpy as np
 import torch
@@ -25,8 +26,9 @@ import matplotlib.patches as patches
 import torchvision.transforms as T
 from torch.utils.data import DataLoader
 from torchvision.datasets import VOCDetection
-from torchvision.models.detection import fasterrcnn_resnet50_fpn
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, fasterrcnn_mobilenet_v3_large_fpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from tqdm import tqdm
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -96,15 +98,27 @@ def collate_fn(batch):
 
 
 # ---- Model ----------------------------------------------------------------
-def build_model(num_classes):
+def build_model(num_classes, backbone="resnet50"):
     """
-    Load COCO-pretrained Faster R-CNN (ResNet-50 + FPN) and swap out the
-    final classification + regression head for a new one sized to num_classes.
+    Backbones:
+      "resnet50"   — Faster R-CNN ResNet-50+FPN (accurate, slower on MPS/CPU)
+      "mobilenet"  — Faster R-CNN MobileNet-v3  (faster, ~4x less compute)
 
-    Only the new head is randomly initialised; the backbone is frozen in place
-    conceptually (though we still pass it to the optimiser with a lower LR).
+    The backbone is fully frozen (no gradients) so only the detection head
+    trains. This is the biggest single speed-up on MPS/CPU.
+
+    Image scale is reduced from the default 800/1333 → 600/1000 to shrink
+    feature maps and speed up RPN + RoI pooling.
     """
-    model       = fasterrcnn_resnet50_fpn(weights="DEFAULT")
+    kwargs = dict(weights="DEFAULT", min_size=600, max_size=1000)
+    if backbone == "mobilenet":
+        model = fasterrcnn_mobilenet_v3_large_fpn(**kwargs)
+    else:
+        model = fasterrcnn_resnet50_fpn(**kwargs)
+
+    for p in model.backbone.parameters():
+        p.requires_grad = False
+
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
@@ -131,7 +145,8 @@ def evaluate(model, loader, iou_thresh=0.5, score_thresh=0.5):
     """
     model.eval()
     tp, total = 0, 0
-    for imgs, targets in loader:
+    pbar = tqdm(loader, desc="Evaluating", leave=False)
+    for imgs, targets in pbar:
         imgs  = [img.to(device) for img in imgs]
         preds = model(imgs)
         for pred, target in zip(preds, targets):
@@ -146,11 +161,12 @@ def evaluate(model, loader, iou_thresh=0.5, score_thresh=0.5):
                                                        gt_box.tolist()) >= iou_thresh:
                         tp += 1
                         break
+        pbar.set_postfix({"precision": f"{tp / max(total, 1):.3f}"})
     return tp / max(total, 1)
 
 
 # ---- Train loop -----------------------------------------------------------
-def train_one_epoch(model, loader, optimizer, epoch, print_freq=50):
+def train_one_epoch(model, loader, optimizer, scaler, epoch, total_epochs):
     """
     Faster R-CNN returns a loss dict directly when called with targets,
     so we just sum the components rather than writing a manual loss formula.
@@ -163,25 +179,33 @@ def train_one_epoch(model, loader, optimizer, epoch, print_freq=50):
     """
     model.train()
     running_loss = 0.0
-    for i, (imgs, targets) in enumerate(loader):
+    pbar = tqdm(loader, desc=f"Epoch {epoch:02d}/{total_epochs} [train]", leave=True)
+    for imgs, targets in pbar:
         imgs    = [img.to(device) for img in imgs]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        loss_dict = model(imgs, targets)
-        loss      = sum(loss_dict.values())
+        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+            loss_dict = model(imgs, targets)
+            loss      = sum(loss_dict.values())
 
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         running_loss += loss.item()
 
-        if (i + 1) % print_freq == 0:
-            d = loss_dict
-            print(f"  [{epoch}/{i+1:04d}]  total={loss.item():.4f}  "
-                  f"cls={d['loss_classifier'].item():.3f}  "
-                  f"box={d['loss_box_reg'].item():.3f}  "
-                  f"rpn_cls={d['loss_objectness'].item():.3f}  "
-                  f"rpn_box={d['loss_rpn_box_reg'].item():.3f}")
+        pbar.set_postfix({
+            "loss":    f"{loss.item():.3f}",
+            "cls":     f"{loss_dict['loss_classifier'].item():.3f}",
+            "box":     f"{loss_dict['loss_box_reg'].item():.3f}",
+            "rpn_cls": f"{loss_dict['loss_objectness'].item():.3f}",
+            "rpn_box": f"{loss_dict['loss_rpn_box_reg'].item():.3f}",
+        })
+
     return running_loss / len(loader)
 
 
@@ -252,28 +276,32 @@ if __name__ == "__main__":
     # Data
     train_ds = VOCDetDataset(DATA_ROOT, image_set="train")
     val_ds   = VOCDetDataset(DATA_ROOT, image_set="val")
+    num_workers = min(os.cpu_count(), 4)
+    pin_memory  = device.type == "cuda"
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
-                              num_workers=2, collate_fn=collate_fn)
+                              num_workers=num_workers, collate_fn=collate_fn,
+                              pin_memory=pin_memory, persistent_workers=num_workers > 0)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False,
-                              num_workers=2, collate_fn=collate_fn)
-    print(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Device: {device}")
+                              num_workers=num_workers, collate_fn=collate_fn,
+                              pin_memory=pin_memory, persistent_workers=num_workers > 0)
+    print(f"Train: {len(train_ds)} | Val: {len(val_ds)} | Device: {device} | Workers: {num_workers}")
 
-    # Model — backbone LR is 10× lower to preserve pretrained features
-    model = build_model(NUM_CLASSES).to(device)
-    params = [
-        {"params": [p for n, p in model.named_parameters() if "backbone" in n],
-         "lr": LR * 0.1},
-        {"params": [p for n, p in model.named_parameters() if "backbone" not in n],
-         "lr": LR},
-    ]
-    optimizer = torch.optim.AdamW(params, weight_decay=WEIGHT_DECAY)
+    # Backbone is frozen; only the detection head params need an optimizer.
+    # Switch BACKBONE = "mobilenet" for a ~4x faster alternative.
+    BACKBONE = "resnet50"
+    model  = build_model(NUM_CLASSES, backbone=BACKBONE).to(device)
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(params, lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    scaler    = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
 
     # Training loop
     best_prec = 0.0
     best_path = "best_detector.pth"
     for epoch in range(1, EPOCHS + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, epoch)
+        train_loss = train_one_epoch(model, train_loader, optimizer, scaler, epoch, EPOCHS)
         scheduler.step()
 
         # Detection evaluation is slow — run every 2 epochs
