@@ -90,6 +90,20 @@ class FocalLoss(nn.Module):
     Suppresses the gradient from easy, correctly-classified pixels by (1-p)^gamma,
     so misclassified foreground pixels dominate training instead of the abundant
     background class.  gamma=2 is the standard default.
+
+
+    Numerical example:
+        Confident prediction (p=0.9):
+            ce  = -log(0.9) = 0.105
+            pt  = exp(-0.105) = 0.9
+            weight = (1 - 0.9)^2 = 0.01  → loss nearly zeroed out
+
+        Wrong prediction (p=0.2):
+            ce  = -log(0.2) = 1.609
+            pt  = exp(-1.609) = 0.2
+            weight = (1 - 0.2)^2 = 0.64  → loss stays strong
+
+
     """
     def __init__(self, gamma=2, ignore_index=255):
         super().__init__()
@@ -147,9 +161,6 @@ class CombinedLoss(nn.Module):
 
         Loss = (1 - dice_weight)·Focal  +  dice_weight·Dice
 
-    dice_weight raised to 0.5 (from 0.3) because with a strong pretrained
-    encoder the model no longer needs FocalLoss to dominate early training —
-    giving Dice equal weight from epoch 1 better prevents background collapse.
     """
     def __init__(self, num_classes, gamma=2, ignore_index=255, dice_weight=0.5):
         super().__init__()
@@ -273,7 +284,7 @@ if __name__ == "__main__":
     DATA_ROOT    = "./data"
     IMAGE_SIZE   = 384          # raised from 256; better spatial detail for small objects
     BATCH_SIZE   = 8
-    EPOCHS       = 20
+    EPOCHS       = 50
     LR_ENCODER   = 1e-5         # tiny: preserve the ImageNet features
     LR_DECODER   = 1e-3         # full speed: learn to decode segmentation masks
     WEIGHT_DECAY = 1e-4
