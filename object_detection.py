@@ -121,6 +121,7 @@ def build_model(num_classes, backbone="resnet50"):
 
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+    print(model.rpn)
     return model
 
 
@@ -268,8 +269,8 @@ if __name__ == "__main__":
 
     # Hyper-parameters
     DATA_ROOT    = "./data"
-    BATCH_SIZE   = 4
-    EPOCHS       = 10
+    BATCH_SIZE   = 32
+    EPOCHS       = 20
     LR           = 5e-4
     WEIGHT_DECAY = 5e-4
 

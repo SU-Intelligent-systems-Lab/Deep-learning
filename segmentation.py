@@ -283,8 +283,8 @@ if __name__ == "__main__":
     # Hyper-parameters
     DATA_ROOT    = "./data"
     IMAGE_SIZE   = 384          # raised from 256; better spatial detail for small objects
-    BATCH_SIZE   = 8
-    EPOCHS       = 50
+    BATCH_SIZE   = 64
+    EPOCHS       = 200
     LR_ENCODER   = 1e-5         # tiny: preserve the ImageNet features
     LR_DECODER   = 1e-3         # full speed: learn to decode segmentation masks
     WEIGHT_DECAY = 1e-4
