@@ -1,10 +1,6 @@
 data/
 models/__pycache__/
-best_model.pth
 __pycache__/
-best_mobilenet_v2.pth
-best_resnet18.pth
-best_vgg16.pth
-best_unet.pth
 segmentation_results.png
-best_swin.pth
+best_*
+detection_results.png
