@@ -1,9 +1,12 @@
 """Swin-T for CIFAR-10 (32×32). Liu et al., ICCV 2021. https://arxiv.org/abs/2103.14030"""
 
+import os
 import argparse, copy, time
 import torch, torch.nn as nn, torch.nn.functional as F
-import torchvision, torchvision.transforms as transforms
-from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader, Dataset
+from datasets import load_dataset as hf_load_dataset
+
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else
@@ -216,6 +219,22 @@ class SwinTransformer(nn.Module):
 
 # ── Data ───────────────────────────────────────────────────────────────────────
 
+class HFCIFARDataset(Dataset):
+    def __init__(self, hf_split, transform=None):
+        self.ds = hf_split
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, idx):
+        item = self.ds[idx]
+        img, label = item["img"], item["label"]
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
+
 def get_loaders(batch_size=128):
     MEAN, STD = (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
     train_tf = transforms.Compose([
@@ -224,9 +243,11 @@ def get_loaders(batch_size=128):
         transforms.ToTensor(), transforms.Normalize(MEAN, STD),
     ])
     val_tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(MEAN, STD)])
+    cache_dir = os.path.join(os.path.dirname(__file__), "data")
+    hf_cifar  = hf_load_dataset("cifar10", cache_dir=cache_dir)
+    train_ds  = HFCIFARDataset(hf_cifar["train"], transform=train_tf)
+    val_ds    = HFCIFARDataset(hf_cifar["test"],  transform=val_tf)
     kw = dict(num_workers=2, pin_memory=True)
-    train_ds = torchvision.datasets.CIFAR10("./data", train=True,  download=True, transform=train_tf)
-    val_ds   = torchvision.datasets.CIFAR10("./data", train=False, download=True, transform=val_tf)
     return (DataLoader(train_ds, batch_size=batch_size, shuffle=True,  **kw),
             DataLoader(val_ds,   batch_size=batch_size, shuffle=False, **kw))
 
