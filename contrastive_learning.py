@@ -80,7 +80,8 @@ class ContrastiveDataset(Dataset):
         return self.transform(img), self.transform(img), label
 
 
-_hf_cifar = hf_load_dataset("cifar10")
+import os as _os
+_hf_cifar = hf_load_dataset("cifar10", cache_dir=_os.path.join(_os.path.dirname(__file__), "data"))
 raw_train = HFCIFARDataset(_hf_cifar["train"])
 raw_test  = HFCIFARDataset(_hf_cifar["test"])
 
