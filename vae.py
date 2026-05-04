@@ -18,15 +18,13 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
-import numpy as np
-
 
 
 # Fix for macOS SSL certificate verification error when downloading MNIST
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # ── Config ────────────────────────────────────────────────────────────────────
-LATENT_DIM = 2        # 2D so we can plot the latent space directly
+LATENT_DIM = 64
 HIDDEN_DIM = 400
 EPOCHS     = 100
 BATCH_SIZE = 128
@@ -146,27 +144,4 @@ for i, ax in enumerate(axes.flat):
 plt.suptitle("Samples from the prior N(0, I)")
 plt.tight_layout()
 plt.savefig("vae_samples.png", dpi=120)
-plt.show()
-
-
-# ── Visualization 2: latent space colored by digit class ──────────────────────
-all_mu, all_labels = [], []
-model.eval()
-with torch.no_grad():
-    for x, y in test_loader:
-        mu, _ = model.encoder(x.to(DEVICE))
-        all_mu.append(mu.cpu())
-        all_labels.append(y)
-
-all_mu     = torch.cat(all_mu).numpy()
-all_labels = torch.cat(all_labels).numpy()
-
-plt.figure(figsize=(8, 6))
-scatter = plt.scatter(all_mu[:, 0], all_mu[:, 1],
-                      c=all_labels, cmap="tab10", s=2, alpha=0.5)
-plt.colorbar(scatter, ticks=range(10), label="digit")
-plt.title("VAE latent space (test set)")
-plt.xlabel("z₁"); plt.ylabel("z₂")
-plt.tight_layout()
-plt.savefig("vae_latent_space.png", dpi=120)
 plt.show()

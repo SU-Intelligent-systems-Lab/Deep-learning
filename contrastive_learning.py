@@ -19,8 +19,8 @@ from datasets import load_dataset as hf_load_dataset
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
-EPOCHS_CONTRASTIVE = 10
-EPOCHS_LINEAR      = 10
+EPOCHS_CONTRASTIVE = 50
+EPOCHS_LINEAR      = 50
 BATCH_SIZE         = 256
 TEMPERATURE        = 0.5    # sharpens/softens the similarity distribution
 PROJ_DIM           = 64     # projection head output dimension

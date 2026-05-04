@@ -4,3 +4,4 @@ __pycache__/
 segmentation_results.png
 best_*
 detection_results.png
+vae_samples.png
