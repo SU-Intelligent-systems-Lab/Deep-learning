@@ -15,6 +15,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from datasets import load_dataset as hf_load_dataset
+import os
+
 
 
 
@@ -40,7 +42,7 @@ augment = transforms.Compose([
                          (0.2023, 0.1994, 0.2010)),
 ])
 
-# For linear evaluation we just normalize, no aggressive augmentation
+# For linear evaluation we just normalize, no augmentation
 eval_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465),
@@ -60,17 +62,13 @@ class HFCIFARDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.ds[idx]
-        img, label = item["img"], item["label"]
-        if self.transform:
-            img = self.transform(img)
-        return img, label
+        return (self.transform(item["img"]) if self.transform else item["img"]), item["label"]
 
 
 class ContrastiveDataset(Dataset):
     """Returns two independent augmented views of each image."""
     def __init__(self, base_dataset, transform):
-        self.ds        = base_dataset
-        self.transform = transform
+        self.ds, self.transform = base_dataset, transform
 
     def __len__(self):
         return len(self.ds)
@@ -80,13 +78,10 @@ class ContrastiveDataset(Dataset):
         return self.transform(img), self.transform(img), label
 
 
-import os as _os
-_hf_cifar = hf_load_dataset("cifar10", cache_dir=_os.path.join(_os.path.dirname(__file__), "data"))
-raw_train = HFCIFARDataset(_hf_cifar["train"])
-raw_test  = HFCIFARDataset(_hf_cifar["test"])
+_hf_cifar = hf_load_dataset("cifar10", cache_dir=os.path.join(os.path.dirname(__file__), "data"))
 
 contrastive_loader = DataLoader(
-    ContrastiveDataset(raw_train, augment),
+    ContrastiveDataset(HFCIFARDataset(_hf_cifar["train"]), augment),
     batch_size=BATCH_SIZE, shuffle=True, num_workers=0, drop_last=True
 )
 linear_train_loader = DataLoader(
@@ -117,7 +112,7 @@ class Encoder(nn.Module):
         )
 
     def forward(self, x):
-        return self.net(x).squeeze(-1).squeeze(-1)   # (B, 128)
+        return self.net(x).flatten(1)   # (B, 128)
 
 
 # ── Projection head ───────────────────────────────────────────────────────────
@@ -159,10 +154,7 @@ def nt_xent_loss(z1, z2, temperature):
     sim.masked_fill_(mask, float("-inf"))
 
     # Positive indices: (i, i+N) and (i+N, i)
-    pos_indices = torch.cat([
-        torch.arange(N, 2 * N),   # for z1_i, positive is z2_i (at i+N)
-        torch.arange(0, N)        # for z2_i, positive is z1_i (at i)
-    ]).to(z.device)
+    pos_indices = torch.cat([torch.arange(N, 2*N), torch.arange(N)]).to(z.device)
 
     loss = F.cross_entropy(sim, pos_indices)
     return loss
